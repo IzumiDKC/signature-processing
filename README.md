@@ -60,6 +60,8 @@ GitHub Actions chạy kiểm thử và build khi push lên `main` hoặc mở pu
 
 ## Triển khai
 
+**Vercel:** import repository, giữ Root Directory ở gốc và chọn Framework Preset **Other**. `vercel.json` tự cài thư viện, build và phục vụ `web/dist`. Nếu đã chọn Root Directory là `web`, cấu hình `web/vercel.json` cũng được hỗ trợ. Chi tiết trong [hướng dẫn triển khai](web/DEPLOY.md).
+
 Đưa **nội dung `web/dist/`** lên hosting tĩnh có HTTPS. Nếu hosting build từ repository:
 
 | Cấu hình | Giá trị |

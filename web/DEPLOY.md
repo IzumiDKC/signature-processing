@@ -1,5 +1,19 @@
 # Triển khai Signature Cleaner lên hosting tĩnh
 
+## Vercel
+
+Import repository và giữ **Root Directory ở gốc repository** (để trống hoặc `.`), Framework Preset **Other**. File `vercel.json` ở gốc đã khai báo:
+
+- Install Command: `npm --prefix web ci --ignore-scripts --no-audit --no-fund`
+- Build Command: `npm --prefix web run build`
+- Output Directory: `web/dist`
+
+Không cần bật override các lệnh trong dashboard. Nếu dự án đã đặt **Root Directory = `web`**, cấu hình `web/vercel.json` sẽ được dùng với các đường dẫn tương ứng (`dist`, `npm run build`). Chỉ file cấu hình trong root được chọn có hiệu lực.
+
+Lỗi **Ready nhưng 404 NOT_FOUND** xảy ra nếu deploy từ gốc repository mà chưa build hoặc chưa chỉ định thư mục `web/dist`: gốc repository không có `index.html`. Deploy commit mới chứa cấu hình; không redeploy lại commit cũ. Git integration có thể tự triển khai khi push vào `main`.
+
+Headers cho Vercel được khai báo trong `vercel.json`; `_headers` dành cho các nền tảng khác có hỗ trợ file này.
+
 ## Bản phát hành
 
 Mã nguồn: `web/src/`. Thư viện duy nhất: ImageTracerJS 1.2.6, được cố định trong `package-lock.json`, giấy phép Unlicense. Build chép thư viện và giấy phép vào `dist/vendor/`; không phụ thuộc CDN khi chạy.
