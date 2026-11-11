@@ -35,6 +35,21 @@ function boxBlur(source, width, height, radius) {
   return dest;
 }
 
+function maxFilter(source, width, height, radius) {
+  const temp = new Float32Array(source.length), dest = new Float32Array(source.length);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    let m = 0;
+    for (let k = Math.max(0, x - radius); k <= Math.min(width - 1, x + radius); k++) m = Math.max(m, source[y * width + k]);
+    temp[y * width + x] = m;
+  }
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    let m = 0;
+    for (let k = Math.max(0, y - radius); k <= Math.min(height - 1, y + radius); k++) m = Math.max(m, temp[k * width + x]);
+    dest[y * width + x] = m;
+  }
+  return dest;
+}
+
 export function extractInk(data, width, height, options = {}) {
   const o = validateOptions(options), n = width * height;
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || n > 1_600_000 || data.length !== n * 4) throw new Error('Dữ liệu ảnh không hợp lệ hoặc quá lớn.');
@@ -60,22 +75,26 @@ export function extractInk(data, width, height, options = {}) {
   const candidates = score.filter(value => value >= baseThreshold).sort();
   const reference = candidates.length ? candidates[Math.floor((candidates.length - 1) * 0.9)] : 0;
   const threshold = Math.max(baseThreshold, reference * (0.5 - o.sensitivity * 0.004));
-  for (let i = 0; i < n; i++) mask[i] = score[i] >= threshold ? 1 : 0;
+  // Hysteresis: faint pixels (>= low) survive only when 8-connected to confident
+  // ink (>= threshold). Isolated faint noise has no strong seed and is dropped.
+  const low = Math.max(baseThreshold * 0.45, threshold * (0.45 - o.sensitivity * 0.002));
+  for (let i = 0; i < n; i++) mask[i] = score[i] >= low ? 1 : 0;
   const seen = new Uint8Array(n), queue = new Int32Array(n);
-  let components = 0, count = 0, x0 = width, y0 = height, x1 = -1, y1 = -1;
+  let components = 0, count = 0, recovered = 0, x0 = width, y0 = height, x1 = -1, y1 = -1;
   for (let seed = 0; seed < n; seed++) {
     if (!mask[seed] || seen[seed]) continue;
-    let head = 0, tail = 1;
+    let head = 0, tail = 1, strong = 0;
     queue[0] = seed; seen[seed] = 1;
     while (head < tail) {
       const p = queue[head++], x = p % width, y = Math.floor(p / width);
+      if (score[p] >= threshold) strong++;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         if ((!dx && !dy) || x + dx < 0 || x + dx >= width || y + dy < 0 || y + dy >= height) continue;
         const q = p + dy * width + dx;
         if (mask[q] && !seen[q]) { seen[q] = 1; queue[tail++] = q; }
       }
     }
-    if (tail < o.minArea) {
+    if (!strong || tail < o.minArea) {
       for (let k = 0; k < tail; k++) { mask[queue[k]] = 0; score[queue[k]] = 0; }
       continue;
     }
@@ -84,6 +103,19 @@ export function extractInk(data, width, height, options = {}) {
       const x = queue[k] % width, y = Math.floor(queue[k] / width);
       x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
     }
+  }
+  // Faint strokes: rescale each neighbourhood so its contour sits at 40% of the
+  // local ink peak. Pixels much weaker than nearby solid ink are halo, not stroke,
+  // and pixels outside the hysteresis mask stay below threshold (no growth).
+  const masked = score.map((v, i) => mask[i] ? v : 0);
+  const peak = maxFilter(masked, width, height, 1), solid = maxFilter(masked, width, height, 3);
+  for (let i = 0; i < n; i++) {
+    const m = peak[i];
+    if (m < low || m >= threshold / 0.4 || !score[i]) continue;
+    if (solid[i] >= threshold * 1.6 && score[i] < solid[i] * 0.3) continue;
+    const value = score[i] * threshold / (0.4 * m);
+    if (mask[i] && score[i] < threshold && value >= threshold) recovered++;
+    score[i] = mask[i] ? Math.max(score[i], value) : Math.min(value, threshold * 0.999);
   }
   if (count < 8) throw new Error('Không tìm đủ nét mực. Thử tăng độ nhạy hoặc dùng ảnh gốc rõ hơn.');
   if (count / n > 0.6) throw new Error('Vùng tối chiếm gần hết ảnh. Hãy dùng ảnh chữ ký trên nền sáng hoặc cắt sát vùng ký.');
@@ -99,6 +131,7 @@ export function extractInk(data, width, height, options = {}) {
   if (Math.min(width, height) < 180) warnings.push('Ảnh gốc nhỏ. Kiểm tra các nét mảnh trước khi sử dụng.');
   if (x0 <= 1 || y0 <= 1 || x1 >= width - 2 || y1 >= height - 2) warnings.push('Chữ ký sát mép ảnh. Kiểm tra nét bị cắt hoặc viền giấy.');
   if (components > 50) warnings.push('Nhiều vùng mực rời; kiểm tra chấm nhiễu và nét đứt.');
+  if (recovered > count * 0.05) warnings.push('Đã khôi phục nét mờ từ ảnh gốc. Đối chiếu kỹ trước khi sử dụng.');
   if (count / n > 0.25) warnings.push('Vùng mực lớn; có thể lẫn chữ in, dấu mộc hoặc bóng nền.');
   return { score, mask, width, height, threshold, bbox: [x0, y0, x1 - x0 + 1, y1 - y0 + 1], components, count, inkColor, warnings };
 }
