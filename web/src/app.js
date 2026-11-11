@@ -29,8 +29,8 @@ function setBusy(value) {
 }
 
 function releaseResult(item) {
-  for (const key of ['svgUrl', 'pngUrl']) if (item[key]) { URL.revokeObjectURL(item[key]); item[key] = null; }
-  item.result = null; item.png = null;
+  for (const key of ['svgUrl', 'pngUrl', 'jpgUrl']) if (item[key]) { URL.revokeObjectURL(item[key]); item[key] = null; }
+  item.result = null; item.png = null; item.jpg = null;
 }
 
 async function addFiles(files) {
@@ -98,6 +98,21 @@ async function rasterize(svg, width, height) {
   } finally { URL.revokeObjectURL(url); }
 }
 
+// JPG has no alpha channel: flatten the transparent PNG onto white, generated lazily and cached.
+async function ensureJpg(item) {
+  if (item.jpg) return item.jpg;
+  const bitmap = await createImageBitmap(item.png);
+  const canvas = document.createElement('canvas'); canvas.width = bitmap.width; canvas.height = bitmap.height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.95));
+  canvas.width = canvas.height = 1;
+  if (!blob) throw new Error('Không xuất được JPG. Thử kích thước nhỏ hơn.');
+  item.jpg = blob; item.jpgUrl = URL.createObjectURL(blob);
+  return blob;
+}
+
 async function runBatch(items) {
   if (state.busy || state.saving || !items.length) return;
   state.cancel = false;
@@ -145,7 +160,7 @@ function card(item, index) {
     <div class="card-compare"><div class="preview-pane"><div class="preview-label">Ảnh gốc</div><div class="preview-image white">${item.sourceUrl ? `<img src="${item.sourceUrl}" alt="Ảnh gốc ${escape(item.name)}" loading="lazy">` : placeholder}</div></div><div class="preview-pane"><div class="preview-label">Kết quả <span>SVG</span></div><div class="preview-image ${state.background}">${item.svgUrl ? `<img src="${item.svgUrl}" alt="Kết quả ${escape(item.name)}" loading="lazy">` : placeholder}</div></div></div>
     <div class="card-detail"><span>${item.options ? `${item.options.width} × ${item.options.height} px` : 'Chờ xuất ảnh'}</span><button class="text-button" data-action="inspect" ${!item.result || state.busy ? 'disabled' : ''}>Xem lớn & đối chiếu ↗</button></div>
     ${note ? `<p class="card-note ${item.error ? 'error-text' : ''}" title="${escape(note)}">${escape(note)}</p>` : ''}
-    <div class="card-actions"><button class="button secondary" data-action="svg" ${!ready || state.busy || state.saving ? 'disabled' : ''}>↓ SVG</button><button class="button secondary" data-action="png" ${!ready || state.busy || state.saving ? 'disabled' : ''}>↓ PNG</button>${item.status === 'error' ? `<button class="button secondary copy" data-action="retry" ${state.busy || state.saving || item.inputError ? 'disabled' : ''}>Thử lại</button>` : `<button class="button secondary copy" data-action="copy" ${!ready || state.busy || state.saving ? 'disabled' : ''}>Sao chép</button>`}</div>
+    <div class="card-actions"><button class="button secondary" data-action="svg" ${!ready || state.busy || state.saving ? 'disabled' : ''}>↓ SVG</button><button class="button secondary" data-action="png" ${!ready || state.busy || state.saving ? 'disabled' : ''}>↓ PNG</button><button class="button secondary" data-action="jpg" ${!ready || state.busy || state.saving ? 'disabled' : ''}>↓ JPG</button>${item.status === 'error' ? `<button class="button secondary copy" data-action="retry" ${state.busy || state.saving || item.inputError ? 'disabled' : ''}>Thử lại</button>` : `<button class="button secondary copy" data-action="copy" ${!ready || state.busy || state.saving ? 'disabled' : ''}>Sao chép</button>`}</div>
   </article>`;
 }
 
@@ -184,9 +199,10 @@ function render() {
   document.querySelectorAll('[data-bg]').forEach(button => button.classList.toggle('active', button.dataset.bg === state.background));
 }
 
-function download(item, format) {
+async function download(item, format) {
   if (!current(item)) { toast('Hãy áp dụng lại thiết lập trước khi xuất ảnh.'); return; }
-  const a = document.createElement('a'); a.href = format === 'svg' ? item.svgUrl : item.pngUrl;
+  if (format === 'jpg') { try { await ensureJpg(item); } catch (error) { toast(error.message); return; } }
+  const a = document.createElement('a'); a.href = { svg: item.svgUrl, png: item.pngUrl, jpg: item.jpgUrl }[format];
   a.download = `${item.stem}.${format}`; document.body.append(a); a.click(); a.remove();
 }
 
@@ -223,12 +239,12 @@ async function saveAll() {
       for (const item of eligible) {
         const file = await unusedFile(directory, `${item.stem}.${format}`);
         const writable = await file.createWritable();
-        await writable.write(format === 'svg' ? new Blob([item.result.svg], { type: 'image/svg+xml' }) : item.png);
+        await writable.write(format === 'svg' ? new Blob([item.result.svg], { type: 'image/svg+xml' }) : format === 'jpg' ? await ensureJpg(item) : item.png);
         await writable.close(); saved++;
       }
       toast(`Đã lưu ${saved}/${state.items.length} ảnh.${state.items.length > saved ? ` ${state.items.length - saved} ảnh cần xử lý lại trước khi lưu.` : ''}`, 10000);
     } else {
-      for (const item of eligible) { download(item, format); saved++; await new Promise(resolve => setTimeout(resolve, 220)); }
+      for (const item of eligible) { await download(item, format); saved++; await new Promise(resolve => setTimeout(resolve, 220)); }
       toast(`Đã gửi ${saved}/${state.items.length} ảnh tới trình tải xuống. Cho phép tải nhiều file nếu trình duyệt hỏi; kiểm tra số file đã nhận.`, 10000);
     }
   } catch (error) {
@@ -247,7 +263,7 @@ function inspect(item) {
   $('#inspect-board').className = `inspect-board ${state.background}`;
   $('#zoom').value = '1'; $('#inspect-result').style.width = ''; $('#inspect-result').style.height = '';
   $('#inspect-notes').textContent = item.result.warnings.join(' ') || 'Đối chiếu nét nhỏ, chấm và vòng với bản gốc trước khi dùng.';
-  for (const id of ['inspect-svg', 'inspect-png', 'inspect-copy']) $('#' + id).disabled = !current(item);
+  for (const id of ['inspect-svg', 'inspect-png', 'inspect-jpg', 'inspect-copy']) $('#' + id).disabled = !current(item);
   $('#inspect-dialog').showModal();
 }
 
@@ -287,6 +303,7 @@ $('#next').addEventListener('click', () => { state.page++; render(); });
 $('#close-inspect').addEventListener('click', () => $('#inspect-dialog').close());
 $('#inspect-svg').addEventListener('click', () => download(state.inspect, 'svg'));
 $('#inspect-png').addEventListener('click', () => download(state.inspect, 'png'));
+$('#inspect-jpg').addEventListener('click', () => download(state.inspect, 'jpg'));
 $('#inspect-copy').addEventListener('click', () => copy(state.inspect));
 $('#zoom').addEventListener('change', () => {
   const zoom = Number($('#zoom').value);
