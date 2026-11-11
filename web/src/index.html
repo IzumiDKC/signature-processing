@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Làm sạch chữ ký hàng loạt, xuất SVG và PNG trong suốt ngay trong trình duyệt.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Signature Cleaner — Xóa nền chữ ký</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Signature Cleaner, trang chủ"><img class="brand-mark" src="./favicon.svg" alt="" width="36" height="36"><span>Signature<span class="brand-light">Cleaner</span></span></a>
+    <div class="header-right"><span class="privacy"><i></i> Xử lý trên thiết bị</span><button id="help-button" class="text-button">Hướng dẫn</button></div>
+  </header>
+  <div class="workspace">
+    <aside class="settings">
+      <div class="side-heading"><h2>Tùy chỉnh</h2><button id="reset" class="text-button">Đặt lại</button></div>
+      <form id="options">
+        <fieldset><legend>Màu mực</legend><div class="color-options">
+          <label><input type="radio" name="color" value="blue" checked><span class="swatch blue"></span>Xanh đậm</label>
+          <label><input type="radio" name="color" value="black"><span class="swatch black"></span>Đen</label>
+          <label><input type="radio" name="color" value="auto"><span class="swatch auto"></span>Lấy từ ảnh</label>
+        </div></fieldset>
+        <fieldset><legend>Tách nền</legend>
+          <label class="range-label" for="sensitivity">Độ nhạy <output id="sensitivity-value">55</output></label>
+          <input id="sensitivity" name="sensitivity" type="range" min="0" max="100" value="55">
+          <div class="range-ends"><span>Thấp</span><span>Cao</span></div>
+          <label class="range-label" for="minArea">Lọc nhiễu <output id="minArea-value">2 px</output></label>
+          <input id="minArea" name="minArea" type="range" min="1" max="20" value="2">
+          <label class="range-label" for="smoothing">Độ mượt <output id="smoothing-value">35%</output></label>
+          <input id="smoothing" name="smoothing" type="range" min="0" max="100" value="35">
+          <p class="hint">Tăng độ nhạy nếu ảnh bị mất nét mảnh.</p>
+        </fieldset>
+        <fieldset><legend>Kích thước PNG</legend>
+          <label class="sr-only" for="size">Khung ảnh PNG</label>
+          <select id="size" name="size"><option value="1200,480">1200 × 480 px</option><option value="2400,960">2400 × 960 px</option><option value="600,240">600 × 240 px</option></select>
+        </fieldset>
+      </form>
+      <button id="process-all" class="button primary full" disabled>Áp dụng cho tất cả</button>
+      <p id="settings-note" class="hint" role="status" hidden></p>
+    </aside>
+    <main>
+      <div class="intro"><div><h1>Xóa nền chữ ký</h1><p class="lede">Tạo chữ ký nền trong suốt để sử dụng trong tài liệu.</p></div></div>
+      <section class="upload-area" id="drop-zone" aria-label="Thêm ảnh chữ ký">
+        <div class="upload-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 21V6m-6 6 6-6 6 6M6 21v5h20v-5"/></svg></div>
+        <div class="upload-copy"><h2>Kéo thả ảnh vào đây</h2><p>JPG, PNG, WEBP · Tối đa 20 MB mỗi ảnh</p></div>
+        <label class="button primary file-label" for="file-input"><span aria-hidden="true">＋</span> Chọn ảnh</label>
+        <input id="file-input" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple>
+      </section>
+      <div class="batch-progress" id="batch-progress" hidden><div><span id="progress-label">Đang chuẩn bị…</span><button id="cancel" class="text-button">Dừng xử lý</button></div><progress id="progress" max="1" value="0"></progress></div>
+      <div class="results-toolbar"><div class="results-heading"><h2>Kết quả <span id="total-count" hidden>0</span></h2><p id="summary" class="muted small" role="status" hidden></p></div>
+        <div class="batch-actions" id="batch-actions" hidden><label class="sr-only" for="batch-format">Định dạng tải xuống</label><select id="batch-format" aria-label="Định dạng tải xuống"><option value="svg">SVG</option><option value="png">PNG</option></select><button id="save-all" class="button secondary" disabled>↓ Lưu tất cả</button><button id="clear-all" class="icon-button" aria-label="Xóa toàn bộ ảnh" title="Xóa toàn bộ ảnh" disabled>×</button></div>
+      </div>
+      <div class="view-toolbar" id="view-toolbar" hidden><div class="tabs" role="group" aria-label="Lọc kết quả"><button class="active" data-filter="all">Tất cả</button><button data-filter="ready">Đã xử lý</button><button data-filter="error">Cần xử lý lại</button></div><div class="background-toggle" role="group" aria-label="Nền xem trước"><span>Nền</span><button data-bg="checker" class="bg-choice checker active" aria-label="Nền ô caro" title="Nền ô caro"></button><button data-bg="white" class="bg-choice white" aria-label="Nền trắng" title="Nền trắng"></button><button data-bg="dark" class="bg-choice dark" aria-label="Nền tối" title="Nền tối"></button></div></div>
+      <div id="empty-state" class="empty-state"><div class="empty-art" aria-hidden="true"><svg viewBox="0 0 220 110"><rect x="14" y="14" width="110" height="78" rx="12" fill="#eef1ec" transform="rotate(-8 70 54)"/><rect x="86" y="18" width="117" height="78" rx="12" fill="white" stroke="#cedbd3"/><path d="m106 68 19-31-8 39 21-21-3 18 24-19-8 18 28-6" fill="none" stroke="#428171" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M168 18v-8m-4 4h8" stroke="#b2c6b6" stroke-width="2"/></svg></div><h3>Chưa có ảnh</h3><p>Thêm ảnh chữ ký để bắt đầu.</p><button id="demo" class="text-button">Dùng ảnh mẫu</button></div>
+      <div id="results" class="result-grid" aria-live="polite"></div>
+      <nav class="pagination" id="pagination" hidden aria-label="Trang kết quả"><button id="prev" class="button secondary">← Trước</button><span id="page-label"></span><button id="next" class="button secondary">Sau →</button></nav>
+      <p id="batch-help" class="batch-help" hidden></p>
+      <footer><span>Signature Cleaner</span><span>Ảnh không được tải lên máy chủ.</span></footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="inspect-dialog"><div class="dialog-top"><div><h2 id="inspect-name"></h2></div><button id="close-inspect" class="icon-button" aria-label="Đóng xem lớn">×</button></div>
+    <div class="zoom-row"><span>Thu phóng</span><label class="sr-only" for="zoom">Mức phóng đại</label><select id="zoom"><option value="1">100%</option><option value="2">200%</option><option value="4">400%</option></select></div>
+    <div class="inspect-grid"><section><h3>Ảnh gốc <span id="original-size"></span></h3><div class="inspect-board white"><img id="inspect-original" alt="Chữ ký gốc"></div></section><section><h3>Kết quả vector <span>SVG</span></h3><div id="inspect-board" class="inspect-board checker"><img id="inspect-result" alt="Chữ ký đã chuyển thành vector"></div></section></div>
+    <p id="inspect-notes" class="hint"></p><div class="dialog-actions"><button id="inspect-svg" class="button primary">↓ Xuất SVG</button><button id="inspect-png" class="button secondary">↓ Xuất PNG</button><button id="inspect-copy" class="button secondary">Sao chép cho Word</button></div>
+  </dialog>
+  <dialog id="help-dialog"><div class="dialog-top"><h2>Hướng dẫn sử dụng</h2><button id="close-help" class="icon-button" aria-label="Đóng hướng dẫn">×</button></div><div class="help-content"><h3>Thêm và chỉnh ảnh</h3><p>Chọn ảnh chữ ký trên nền sáng. Ảnh được xử lý tự động. Nếu cần, chỉnh độ nhạy hoặc lọc nhiễu rồi nhấn “Áp dụng cho tất cả”.</p><h3>Tải kết quả</h3><p><strong>SVG</strong> phù hợp khi cần thay đổi kích thước trong Word hỗ trợ định dạng này. Chọn Chèn → Ảnh → Thiết bị này để thêm file.</p><p><strong>PNG</strong> dùng cho phần mềm ký số hoặc ứng dụng chỉ nhận ảnh. Nút “Sao chép” sao chép PNG trong suốt để dán bằng Ctrl+V.</p><p><strong>Lưu tất cả</strong> lưu các ảnh đã xử lý vào một thư mục. File trùng tên được thêm số. Trình duyệt không hỗ trợ chọn thư mục sẽ tải lần lượt từng file.</p><h3>Trước khi sử dụng</h3><p>Đối chiếu với ảnh gốc, đặc biệt các nét nhỏ hoặc mờ. Công cụ không khôi phục được chi tiết đã mất. Hãy lưu kết quả trước khi đóng hoặc tải lại trang.</p><p class="muted small"><a href="https://support.microsoft.com/en-gb/office/graphics-visuals/edit-svg-images-in-microsoft-365" target="_blank" rel="noreferrer">Cách chèn SVG trong Microsoft 365 ↗</a></p></div></dialog>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
